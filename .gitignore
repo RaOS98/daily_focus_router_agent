@@ -3,6 +3,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Secrets (ignore everything inside /secrets)
+secrets/*
+!secrets/.gitkeep
+!secrets/README.md
+
 # C extensions
 *.so
 
