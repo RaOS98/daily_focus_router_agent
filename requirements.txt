@@ -1,0 +1,10 @@
+langchain>=0.2.11
+langchain-community>=0.2.10
+langchain-ollama>=0.1.0
+pydantic>=2.8.0
+python-dotenv>=1.0.1
+pytz>=2024.1
+notion-client>=2.2.1
+google-api-python-client>=2.136.0
+google-auth>=2.30.0
+google-auth-oauthlib>=1.2.1
