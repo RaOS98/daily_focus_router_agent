@@ -1,7 +1,9 @@
 from __future__ import annotations
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
-from langchain_ollama import OllamaLLM
+from typing import Any, Dict
+
+from langchain.agents import create_agent
+from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage
 
 from ..config import OLLAMA_MODEL, OLLAMA_BASE_URL
 from ..tools import (
@@ -12,68 +14,78 @@ from ..tools import (
     schedule_blocks,
 )
 
-REACT_PROMPT = PromptTemplate.from_template(
-    """
-You are "Daily Focus Router Agent". Turn emails + to-dos into a plan for TODAY using ONLY the tools.
+SYSTEM_PROMPT = """
+You are "Daily Focus Router Agent".
 
-Language policy: Inputs may be Spanish or English. Reason internally in English. All outputs (to-dos, calendar titles, final summary) must be English. Preserve names/numbers/dates as-is.
+Language policy:
+- Inputs may be Spanish or English. Internally reason in English.
+- All user-visible outputs (to-dos, calendar titles/descriptions, final summary) must be English.
+- Preserve names, numbers, and dates exactly (do not translate those). Quote short spans if unsure.
 
-Formatting rules (MANDATORY):
-- Respond in steps using this EXACT cycle:
-  Thought:
-  Action:
-  Action Input:
-- DO NOT write "Observation" yourself. The framework will run the tool and append "Observation:" automatically.
-- NOTHING between Thought and Action (no extra text).
-- For tools with no input, use empty string "" in Action Input.
-- **Never write 'Final Answer' until AFTER you have called `schedule_blocks` (or you have determined there are zero actionable emails and zero tasks to schedule).**
+Goal for TODAY:
+1) Fetch recent emails and decide which are ACTIONABLE (review, approve, send, decide, coordinate; today/tomorrow/this week).
+   Ignore newsletters and invoices with no explicit ask.
+2) For each actionable email, create ONE concise to-do line in English.
+3) List all open tasks.
+4) Choose 3–5 MITs for today with estimated minutes (bundle <15m items into one "Admin Sweep" ≤30m total).
+5) Schedule blocks today respecting: 08:30–19:00, lunch 13:00–14:00, 10' buffers, ≤5 blocks/day, ≤3 deep-work in the morning.
+6) End with a clear English summary: tasks created, MITs chosen, scheduled blocks (start/end).
 
-Tools available:
-{tools}
-Tool names: {tool_names}
+Use available tools to gather facts and take actions. Finish with a final answer only after necessary tool calls.
 
-Minimal example (fictional):
-Thought: I need to fetch recent emails.
-Action: fetch_recent_emails
-Action Input: ""
+Stop condition (VERY IMPORTANT):
+- After you call `schedule_blocks`, DO NOT call any more tools. Immediately produce your final natural-language answer.
+- If there are zero actionable emails and zero tasks to schedule, DO NOT call tools repeatedly. Immediately produce your final natural-language answer stating there is nothing to schedule.
+- Never call the same tool twice for the same purpose (e.g., do not repeatedly call fetch_recent_emails or list_unchecked_tasks).
 
-Thought: Create a to-do for the client's addendum.
-Action: add_notion_todo
-Action Input: "Review and approve client Noelia addendum (today)"
+""".strip()
 
-Thought: List open tasks.
-Action: list_unchecked_tasks
-Action Input: ""
-
-Thought: Prioritize 3–5 MITs with durations.
-Action: prioritize_mits
-Action Input: "[{{\\"text\\": \\"Review client Noelia addendum\\"}}]"
-
-Thought: Schedule blocks for today.
-Action: schedule_blocks
-Action Input: "[{{\\"text\\": \\"Review client Noelia addendum\\", \\"minutes\\": 60}}]"
-
-When actions are complete:
-Final Answer: (clear English summary: tasks created, MITs, blocks with start/end times)
-
-Your goal/input:
-{input}
-
-{agent_scratchpad}
-"""
-)
-
+# Kept so main.py can pass this as the input/goal
 REACT_INSTRUCTIONS = """
-Follow this flow to plan for TODAY (English-only outputs):
-1) fetch_recent_emails → decide which emails are ACTIONABLE (review, approve, send, decide, coordinate; today/tomorrow/this week; addendum/minutes/contract/draft; payments/deadlines). Ignore newsletters and invoices with no ask.
-2) For each actionable email, create ONE concise to-do line in English with add_notion_todo.
-3) list_unchecked_tasks to get all open tasks.
-4) prioritize_mits with those tasks → choose 3–5 MITs and estimate minutes.
-5) schedule_blocks with that JSON → respect 08:30–19:00, lunch 13:00–14:00, 10' buffers, ≤5 blocks/day, ≤3 deep work in the morning.
-End with a clear English summary: tasks created, MITs chosen, and scheduled blocks (start/end time).
-"""
+Plan for TODAY:
+- Triage recent emails → actionable items only.
+- Create concise to-dos in English for actionable emails.
+- List open tasks, select 3–5 MITs with minutes.
+- Schedule blocks per day rules.
+- Summarize outcomes (tasks, MITs, schedule) in English.
+""".strip()
 
-def build_executor() -> AgentExecutor:
+
+class _SimpleAgentAdapter:
+    def __init__(self, runnable):
+        self._runnable = runnable
+
+    def invoke(self, inputs):
+        from langchain_core.messages import HumanMessage, AIMessage
+        user_text = inputs.get("input", "")
+
+        res = self._runnable.invoke(
+            {"messages": [HumanMessage(content=user_text)]},
+            config={"recursion_limit": 50},
+        )
+
+        # Normalize to the old {"output": "..."} shape
+        content = ""
+        msgs = res.get("messages") if isinstance(res, dict) else None
+        if isinstance(msgs, list) and msgs:
+            last = msgs[-1]
+            # AIMessage or dict-like
+            if isinstance(last, AIMessage):
+                content = last.content or ""
+            else:
+                content = (getattr(last, "content", None)
+                           or (isinstance(last, dict) and last.get("content"))
+                           or "")
+        elif isinstance(res, str):
+            content = res
+        else:
+            # fallback: try common fields
+            content = res.get("output", "") if isinstance(res, dict) else ""
+
+        return {"output": content}
+
+
+def build_executor():
     tools = [
         fetch_recent_emails,
         add_notion_todo,
@@ -81,18 +93,20 @@ def build_executor() -> AgentExecutor:
         prioritize_mits,
         schedule_blocks,
     ]
-    # Lower temp + stop sequence helps the model stick to the format:
-    llm = OllamaLLM(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0.1)
-    react = create_react_agent(llm=llm, tools=tools, prompt=REACT_PROMPT)
-    executor = AgentExecutor(
-        agent=react,
-        tools=tools,
-        verbose=True,
-        handle_parsing_errors=(
-        "INVALID FORMAT. Reply using EXACTLY this cycle and DO NOT write 'Observation' "
-        "or 'Final Answer' yet:\nThought:\nAction:\nAction Input:\n"
-        "Only write 'Final Answer' AFTER calling schedule_blocks (or after deciding there is nothing to schedule)."
-        ),
-        max_iterations=20,
+
+    # Chat model (tool-calling capable). Set OLLAMA_MODEL=gpt-oss:20b or similar.
+    llm = ChatOllama(
+        model=OLLAMA_MODEL,
+        base_url=OLLAMA_BASE_URL,
+        temperature=0.0,
     )
-    return executor
+
+    # Modern tool-calling agent (no fragile Thought/Action parsing)
+    agent_runnable = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=SYSTEM_PROMPT,
+    )
+
+    # Return adapter with .invoke(...) so main.py keeps working
+    return _SimpleAgentAdapter(agent_runnable)
