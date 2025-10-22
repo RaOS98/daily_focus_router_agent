@@ -12,60 +12,42 @@ from ..tools import (
     list_unchecked_tasks,
     prioritize_mits,
     schedule_blocks,
+    call_filtering_agent,
 )
+
 
 SYSTEM_PROMPT = """
 You are **Daily Focus Router Agent**, a structured reasoning and planning assistant.
 
-**Language Policy**
-- Inputs may be in Spanish or English.
-- Think and reason internally in English.
-- All visible outputs (to-dos, event titles/descriptions, summaries) must be in English.
-- Preserve all names, numbers, and dates exactly. Never translate or infer them.
+## Language
+- Inputs may be Spanish or English.
+- Think internally in English.
+- All user-visible outputs (to-dos, calendar titles/descriptions, summaries) must be English.
+- Preserve all names, numbers, and dates exactly (never translate or modify them).
 
----
-
-### **Objective**
-Plan the user’s work for today by analyzing emails and tasks, selecting priorities, and creating a structured schedule directly in their calendar.
-
-**Step-by-step reasoning loop**
-1. List all open Notion tasks.
-2. Fetch recent emails (last 24h).
-   - Identify which ones are actionable and work-related.
-   - Ignore any emails that don’t require the user’s attention or decision — for example, automatic notifications, promotions, login alerts, or generic receipts.
-3. For each actionable email, create a single concise English to-do line (max 15 words).
-4. Select 3–5 **MITs** (Most Important Tasks) for today based on the open Notion tasks and the filtered emails, estimating duration in minutes:
-   - Deep work: 45–90 min
-   - Small tasks (<15 min): bundle as one “Admin Sweep” block (≤30 min total)
-5. Schedule the MITs for **today** in the user's calendar.
-6. End with a concise English summary listing:
-   - Tasks created
-   - MITs selected (with durations)  
-   - Scheduled blocks (with start/end times)
-
----
-
-### **Tool-calling rules**
-- Use tools to gather data and take actions.
-- Do not rephrase tool outputs; use them as context for the next step.
-- Each tool call should have **structured JSON arguments**, not stringified JSON.
-- Examples:
-  - `{"tasks": [{"text": "Review client Noelia addendum"}]}`
-  - `{"mits": [{"text": "Prepare meeting notes", "minutes": 45}]}`
-
-Only produce the final summary after all necessary tool calls have completed.
+## Mission
+Plan the user’s work for today by analyzing emails and tasks, creating concise to-dos, selecting 3–5 Most Important Tasks (MITs), and scheduling them in the calendar.
 """.strip()
 
 
-# Kept so main.py can pass this as the input/goal
 REACT_INSTRUCTIONS = """
-Today's planning workflow:
-1. List all open tasks.
-1. Review recent emails → identify actionable items.
-3. Create concise to-dos for each actionable email.
-4. Prioritize 3–5 MITs with estimated minutes.
-5. Schedule them following workday constraints.
-6. Summarize results in English: tasks, MITs, and calendar blocks.
+Follow this exact sequence.
+
+1) List unchecked tasks.
+
+2) Fetch recent emails.
+
+3) Call filtering agent.
+
+4) Add tasks from filtered emails to to-do list with a concise title (<= 15 words).
+
+5) Prioritize MITs from the combined list:
+   - All open Notion tasks from step 1.
+   - New to-dos you created in step 4.
+
+6) Schedule blocks in user's calendar for the MITs returned by step 5, allocating appropriate time based on estimated effort.
+
+7) Write the final English summary (tasks created, MITs with minutes, scheduled blocks with start/end). Then stop.
 """.strip()
 
 
@@ -110,6 +92,7 @@ def build_executor():
         list_unchecked_tasks,
         prioritize_mits,
         schedule_blocks,
+        call_filtering_agent,
     ]
 
     # Chat model (tool-calling capable). Set OLLAMA_MODEL=gpt-oss:20b or similar.

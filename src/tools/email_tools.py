@@ -1,5 +1,6 @@
+# src/tools/email_tools.py
 from __future__ import annotations
-import json
+from typing import List, Dict
 from langchain.tools import tool
 
 from ..providers.gmail_provider import GmailProvider
@@ -8,19 +9,28 @@ from ..store import STORE
 GMAIL = GmailProvider()
 
 @tool("fetch_recent_emails", return_direct=False)
-def fetch_recent_emails() -> str:
-    """Fetch last 24h emails (subject + snippet). Returns JSON list with keys:
-    thread_id, subject, snippet, sender, date. Sorted newest-first.
-    Call at most once per run."""
+def fetch_recent_emails() -> List[Dict]:
+    """
+    Fetch the last 24 hours of emails.
 
-    # Debugging line
+    Returns:
+        list[dict]: Newest-first items with keys:
+            - thread_id: str
+            - subject: str
+            - snippet: str
+            - sender: str
+            - date: str (ISO 8601)
+
+    Notes:
+        - Takes no arguments.
+        - Call at most once per planning run.
+    """
     print("[fetch_recent_emails] invoked")
 
     raw = GMAIL.fetch_last_24h()
-
-    # sort newest-first and trim
     raw = sorted(raw, key=lambda m: m.get("date", ""), reverse=True)
-    out = []
+
+    out: List[Dict] = []
     for m in raw:
         item = {
             "thread_id": m.get("thread_id"),
@@ -31,13 +41,16 @@ def fetch_recent_emails() -> str:
         }
         out.append(item)
 
-        # Seed a mapping row so later tools can attach Notion/Calendar IDs.
+        # Pre-seed a mapping row so later tools can attach Notion/Calendar IDs.
         tid = item.get("thread_id")
         if tid:
-            STORE.upsert_mapping(thread_id=tid)
+            try:
+                STORE.upsert_mapping(thread_id=tid)
+            except Exception:
+                # Don't block the tool on store write issues.
+                pass
 
-    # Optional: if your Gmail provider exposes a sync cursor/history id, persist it.
-    # Example (safe no-op if attribute/method doesn't exist):
+    # If your Gmail provider exposes a sync cursor/history id, persist it.
     cursor = getattr(GMAIL, "last_history_id", None)
     if cursor:
         try:
@@ -45,4 +58,4 @@ def fetch_recent_emails() -> str:
         except Exception:
             pass
 
-    return json.dumps(out, ensure_ascii=False)
+    return out

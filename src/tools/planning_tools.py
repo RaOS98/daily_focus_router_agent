@@ -62,22 +62,14 @@ def _extract_json_array(s: str) -> List[Any]:
 @tool("prioritize_mits", args_schema=PrioritizeArgs, return_direct=False)
 def prioritize_mits(tasks: List[Dict[str, Any]]) -> str:
     """
-    Select 3–5 Most Important Tasks (MITs) for today and estimate durations.
+    Pick 3–5 Most Important Tasks (MITs) for today and estimate minutes.
 
     Args:
-        tasks: list[dict] | dict | str
-            Prefer a list of {"text": str, ...}. Extra keys (e.g., "thread_id",
-            "notion_block_id") may be present and are passed through when the
-            returned item's text matches exactly. A dict form {"tasks": [...]} or
-            a JSON string of either shape is also accepted.
+        tasks: list | dict | str
+            Prefer [{"text": str, ...}] (or {"tasks": [...]}); JSON string also accepted.
 
     Returns:
-        str: JSON array string like:
-            '[{"text": str, "minutes": int, ...}]'
-            Minutes are clamped to 10–120. No prose.
-
-    Notes:
-        Bundle sub-15m items into one "Admin Sweep" block (≤30m total).
+        str: JSON array string like '[{"text": "...", "minutes": 45, ...}]'.
     """
 
     print("[prioritize_mits] invoked")
@@ -152,7 +144,7 @@ def prioritize_mits(tasks: List[Dict[str, Any]]) -> str:
 @tool("schedule_blocks", args_schema=ScheduleArgs, return_direct=False)
 def schedule_blocks(mits: List[Dict[str, Any]]) -> str:
     """
-    Create calendar events for today's MITs.
+    Schedule calendar events for today's MITs (or next day if run after workday end).
 
     Args:
         mits: list[dict] | dict | str
@@ -193,16 +185,32 @@ def schedule_blocks(mits: List[Dict[str, Any]]) -> str:
     if not normalized:
         return json.dumps([], ensure_ascii=False)
 
-    # Time anchors
+    # --- Time anchors ---------------------------------------------------------
     now = datetime.now(TZ)
-    today = now
-    day_start = TZ.localize(datetime.combine(today.date(), WORKDAY_START))
-    lunch_start = TZ.localize(datetime.combine(today.date(), WORKDAY_LUNCH[0]))
-    lunch_end = TZ.localize(datetime.combine(today.date(), WORKDAY_LUNCH[1]))
-    day_end = TZ.localize(datetime.combine(today.date(), WORKDAY_END))
 
-    # Busy times (calendar + lunch)
-    busy: List[Tuple[datetime, datetime]] = CAL.get_busy(today) + [(lunch_start, lunch_end)]
+    # Compute anchors for "candidate day" (today by default).
+    def _anchors_for(date_obj):
+        day_start_ = TZ.localize(datetime.combine(date_obj, WORKDAY_START))
+        lunch_start_ = TZ.localize(datetime.combine(date_obj, WORKDAY_LUNCH[0]))
+        lunch_end_ = TZ.localize(datetime.combine(date_obj, WORKDAY_LUNCH[1]))
+        day_end_ = TZ.localize(datetime.combine(date_obj, WORKDAY_END))
+        return day_start_, lunch_start_, lunch_end_, day_end_
+
+    # Start by assuming "today"
+    base_date = now.date()
+    day_start, lunch_start, lunch_end, day_end = _anchors_for(base_date)
+
+    # If we are running AFTER today's workday end, schedule on the NEXT day
+    if now >= day_end:
+        base_date = (now + timedelta(days=1)).date()
+        day_start, lunch_start, lunch_end, day_end = _anchors_for(base_date)
+        # For a next-day plan, start cursor at next day's start.
+        now = day_start
+
+    # Busy times (calendar + lunch) for the selected day
+    busy: List[Tuple[datetime, datetime]] = CAL.get_busy(TZ.localize(datetime.combine(base_date, time(0, 0)))) + [
+        (lunch_start, lunch_end)
+    ]
 
     def free_segments(start: datetime, end: datetime, busy_list: List[Tuple[datetime, datetime]]):
         bsorted = sorted(busy_list, key=lambda x: x[0])
@@ -232,7 +240,7 @@ def schedule_blocks(mits: List[Dict[str, Any]]) -> str:
 
         # if morning deep work quota is exhausted, jump cursor to 12:00
         if is_deep and cursor.time() < time(12, 0) and deep_morning_left <= 0:
-            cursor = TZ.localize(datetime.combine(today.date(), time(12, 0)))
+            cursor = TZ.localize(datetime.combine(base_date, time(12, 0)))
 
         placed = False
         cur_busy = busy + created_busy
@@ -321,3 +329,4 @@ def schedule_blocks(mits: List[Dict[str, Any]]) -> str:
                 break
 
     return json.dumps(created, ensure_ascii=False)
+

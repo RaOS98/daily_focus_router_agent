@@ -11,7 +11,7 @@ NOTION = NotionProvider()
 @tool("add_notion_todo", return_direct=False)
 def add_notion_todo(payload: str) -> str:
     """
-    Create a to-do in the Notion “Tasks” page.
+    Add task to to-do in the Notion “Tasks” page.
 
     Args:
         payload: str
