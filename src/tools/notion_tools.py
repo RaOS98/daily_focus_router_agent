@@ -1,33 +1,76 @@
 from __future__ import annotations
 import json
+from typing import Any, Dict
 from langchain.tools import tool
 
 from ..providers.notion_provider import NotionProvider
+from ..store import STORE
 
 NOTION = NotionProvider()
 
 @tool("add_notion_todo", return_direct=False)
-def add_notion_todo(task_text: str) -> str:
-    """Create a checkbox to-do in Notion 'Tasks' page.
-    Input: a concise one-line task text (English). Returns the Notion block_id.
-    Call once per actionable email; avoid duplicates."""
-    text = (task_text or "").strip()
-    if not text:
-        # keep it predictable—models sometimes pass empty strings
-        raise ValueError("Task text must be non-empty.")
-    # keep line short; prevents model from dumping paragraphs into Notion
-    if len(text) > 160:
-        text = text[:157] + "..."
-    block_id = NOTION.add_todo(text)
+def add_notion_todo(payload: str) -> str:
+    """
+    Create a to-do in the Notion “Tasks” page.
+
+    Args:
+        payload: str
+            Either a plain task title (string), or a JSON object string like
+            '{"text": "...", "thread_id": "..."}'. "thread_id" is optional.
+
+    Returns:
+        str: The created Notion block_id.
+
+    Notes:
+        If "thread_id" is provided, the email thread is linked to the Notion
+        block in the tiny store.
+    """
+
+    # Debugging line
+    print("[add_notion_todo] invoked")
+
+    thread_id = None
+    task_text = payload
+
+    # Allow JSON payload with optional thread_id
+    try:
+        obj = json.loads(payload)
+        if isinstance(obj, dict):
+            task_text = str(obj.get("text", "")).strip() or payload
+            # accept either "thread_id" or a more explicit "email_thread_id"
+            thread_id = obj.get("thread_id") or obj.get("email_thread_id")
+    except Exception:
+        # payload was a plain string; that's fine
+        pass
+
+    block_id = NOTION.add_todo(task_text)
+
+    # Link mapping if we know the originating thread
+    if thread_id:
+        try:
+            STORE.upsert_mapping(thread_id=thread_id, notion_block_id=block_id)
+        except Exception:
+            # Don't break tool flow on store errors
+            pass
+
     return block_id
 
+
 @tool("list_unchecked_tasks", return_direct=False)
-def list_unchecked_tasks() -> str:
-    """List all unchecked Notion to-dos.
-    Returns JSON list of {block_id, text}. Call once after creating new to-dos."""
+def list_unchecked_tasks(_: str = "") -> str:
+    """
+    List all open (unchecked) to-dos from the Notion “Tasks” page.
+
+    Returns:
+        JSON array string: '[{"block_id": str, "text": str}]'
+    """
+
+    # Debugging line
+    print("[list_unchecked_tasks] invoked")
+
     tasks = NOTION.list_unchecked()
-    out = [
-        {"block_id": t.get("block_id", t.get("id")), "text": (t.get("text") or "").strip()}
+    items = [
+        {"block_id": t.get("block_id", t.get("id")), "text": t["text"]}
         for t in tasks
     ]
-    return json.dumps(out, ensure_ascii=False)
+    return json.dumps(items, ensure_ascii=False)

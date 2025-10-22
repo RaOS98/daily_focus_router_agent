@@ -8,6 +8,11 @@ secrets/*
 !secrets/.gitkeep
 !secrets/README.md
 
+# Data (ignore everything inside /data)
+data/*
+!data/.gitkeep
+!data/README.md
+
 # C extensions
 *.so
 

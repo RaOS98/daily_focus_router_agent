@@ -15,4 +15,4 @@ if __name__ == "__main__":
         summary = plan_now()
         print("\n===== PLAN SUMMARY =====\n" + summary)
     else:
-        print("Commands:\n  plan_now   — run the planning flow once (last 48h)")
+        print("Commands:\n  plan_now   — run the planning flow once (last 24h)")

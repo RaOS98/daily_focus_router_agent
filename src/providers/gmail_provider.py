@@ -47,7 +47,7 @@ class GmailProvider:
             token_path.write_text(creds.to_json())
         return build('gmail', 'v1', credentials=creds)
 
-    def fetch_last_48h(self, max_results: int = 30) -> List[Dict[str, Any]]:
+    def fetch_last_24h(self, max_results: int = 30) -> List[Dict[str, Any]]:
         if not self.enabled or self.service is None:
             now = datetime.now(TZ)
             return [

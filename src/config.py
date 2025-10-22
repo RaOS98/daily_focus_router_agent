@@ -31,7 +31,7 @@ GOOGLE_SCOPES = [
 ]
 
 # Workday rules
-WORKDAY_START = time(8, 30)
+WORKDAY_START = time(8, 0)
 WORKDAY_LUNCH = (time(13, 0), time(14, 0))
 WORKDAY_END = time(19, 0)
 BLOCK_MIN = 45
