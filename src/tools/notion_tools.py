@@ -1,14 +1,12 @@
 from __future__ import annotations
 import json
 from typing import Any, Dict
-from langchain.tools import tool
 
 from ..providers.notion_provider import NotionProvider
 from ..store import STORE
 
 NOTION = NotionProvider()
 
-@tool("add_notion_todo", return_direct=False)
 def add_notion_todo(payload: str) -> str:
     """
     Add task to to-do in the Notion “Tasks” page.
@@ -56,7 +54,6 @@ def add_notion_todo(payload: str) -> str:
     return block_id
 
 
-@tool("list_unchecked_tasks", return_direct=False)
 def list_unchecked_tasks(_: str = "") -> str:
     """
     List all open (unchecked) to-dos from the Notion “Tasks” page.

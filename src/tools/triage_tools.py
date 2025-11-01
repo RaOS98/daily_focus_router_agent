@@ -2,7 +2,6 @@
 from __future__ import annotations
 import json
 from typing import Any, Dict, List
-from langchain.tools import tool
 from langchain_ollama import ChatOllama
 
 from ..config import OLLAMA_MODEL, OLLAMA_BASE_URL
@@ -70,7 +69,6 @@ def _normalize_emails_arg(arg: Any) -> List[Dict[str, Any]]:
     return out
 
 
-@tool("call_filtering_agent", return_direct=False)
 def call_filtering_agent(emails: Any = None) -> List[Dict[str, Any]]:
     """
     Use the LLM-powered filtering agent to KEEP only actionable, work-related emails.

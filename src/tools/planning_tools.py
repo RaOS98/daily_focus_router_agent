@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, time
 from typing import List, Tuple, Dict, Any
 
 from pydantic import BaseModel, Field
-from langchain.tools import tool
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -59,7 +58,6 @@ def _extract_json_array(s: str) -> List[Any]:
 
 # --- Tools --------------------------------------------------------------------
 
-@tool("prioritize_mits", args_schema=PrioritizeArgs, return_direct=False)
 def prioritize_mits(tasks: List[Dict[str, Any]]) -> str:
     """
     Pick 3–5 Most Important Tasks (MITs) for today and estimate minutes.
@@ -141,7 +139,6 @@ def prioritize_mits(tasks: List[Dict[str, Any]]) -> str:
         return json.dumps(fallback, ensure_ascii=False)
 
 
-@tool("schedule_blocks", args_schema=ScheduleArgs, return_direct=False)
 def schedule_blocks(mits: List[Dict[str, Any]]) -> str:
     """
     Schedule calendar events for today's MITs (or next day if run after workday end).

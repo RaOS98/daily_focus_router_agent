@@ -1,14 +1,12 @@
 # src/tools/email_tools.py
 from __future__ import annotations
 from typing import List, Dict
-from langchain.tools import tool
 
 from ..providers.gmail_provider import GmailProvider
 from ..store import STORE
 
 GMAIL = GmailProvider()
 
-@tool("fetch_recent_emails", return_direct=False)
 def fetch_recent_emails() -> List[Dict]:
     """
     Fetch the last 24 hours of emails.
